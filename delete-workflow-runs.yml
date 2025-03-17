@@ -29,6 +29,11 @@ on:
           - 'failure'
           - 'success'
         default: ''
+      cleanup_self:
+        description: 'Cleanup previous runs of this action'
+        required: true
+        type: boolean
+        default: true
       dry_run:
         description: 'Dry run'
         required: true
@@ -53,6 +58,7 @@ jobs:
               const daysOldInput = '${{ github.event.inputs.days_old }}';
               const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
               const status = '${{ github.event.inputs.status }}';
+              const cleanupSelf = '${{ github.event.inputs.cleanup_self }}' === 'true';
               
               let cutoffDate = null;
               if (daysOldInput && daysOldInput.trim() !== '') {
@@ -61,7 +67,7 @@ jobs:
                 cutoffDate = new Date(now.setDate(now.getDate() - daysOld));
               }
               
-              return { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status };
+              return { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status, cleanupSelf };
             }
             
             async function getWorkflows(workflowName) {
@@ -144,16 +150,45 @@ jobs:
             }
             
             async function main() {
-              const { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status } = parseInputs();
+              const { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status, cleanupSelf } = parseInputs();
               
               console.log(`Searching for workflow runs with the following filters:`);
               console.log(`- Branch: ${branchName || 'All branches'}`);
               console.log(`- Workflow: ${workflowName || 'All workflows'}`);
               console.log(`- Older than: ${cutoffDate ? `${daysOldInput} days` : 'No age filter'}`);
               console.log(`- Status: ${status || 'All statuses'}`);
+              console.log(`- Cleanup self: ${cleanupSelf ? 'Yes' : 'No'}`);
               console.log(`- Dry run: ${dryRun ? 'Yes' : 'No'}`);
               
-              const workflows = await getWorkflows(workflowName);
+              let workflows = await getWorkflows(workflowName);
+              
+              // Add current workflow if self-cleanup is enabled and not already in the list
+              if (cleanupSelf) {
+                const currentRunId = context.runId;
+                try {
+                  const { data: currentRun } = await github.rest.actions.getWorkflowRun({
+                    owner,
+                    repo,
+                    run_id: currentRunId
+                  });
+                  
+                  const currentWorkflowId = currentRun.workflow_id;
+                  
+                  if (!workflows.some(w => w.id === currentWorkflowId)) {
+                    console.log(`Adding current workflow (ID: ${currentWorkflowId}) for cleanup`);
+                    
+                    const { data: currentWorkflow } = await github.rest.actions.getWorkflow({
+                      owner,
+                      repo,
+                      workflow_id: currentWorkflowId
+                    });
+                    
+                    workflows.push(currentWorkflow);
+                  }
+                } catch (error) {
+                  console.error(`Failed to get current workflow: ${error.message}`);
+                }
+              }
               
               let totalRuns = 0;
               let deletedRuns = 0;
@@ -165,6 +200,11 @@ jobs:
                 totalRuns += workflowRuns.length;
                 
                 for (const run of workflowRuns) {
+                  if (run.id === context.runId) {
+                    console.log(`Skipping current run #${run.id}`);
+                    continue;
+                  }
+                  
                   const createdAt = new Date(run.created_at);
                   
                   if (cutoffDate && createdAt >= cutoffDate) continue;
