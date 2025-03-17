@@ -19,11 +19,6 @@ on:
         description: 'Only delete runs older than X days'
         required: false
         type: number
-      dry_run:
-        description: 'Dry run'
-        required: true
-        type: boolean
-        default: true
       status:
         description: 'Filter by run status'
         required: false
@@ -34,6 +29,11 @@ on:
           - 'failure'
           - 'success'
         default: ''
+      dry_run:
+        description: 'Dry run'
+        required: true
+        type: boolean
+        default: true
 
 jobs:
   delete-runs:
