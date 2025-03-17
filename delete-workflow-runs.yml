@@ -55,7 +55,18 @@ jobs:
             
             async function getWorkflows(workflowName) {
               if (workflowName) {
-                return [{ name: workflowName }];
+                console.log('Fetching workflow by name...');
+                const { data: allWorkflows } = await github.rest.actions.listRepoWorkflows({
+                  owner,
+                  repo,
+                });
+                const matchingWorkflow = allWorkflows.workflows.find(w => w.name === workflowName || w.path.endsWith(`/${workflowName}`) || w.path === workflowName);
+                if (matchingWorkflow) {
+                  console.log(`Found workflow: ${matchingWorkflow.name} (${matchingWorkflow.id})`);
+                  return [matchingWorkflow];
+                } else {
+                  throw new Error(`Workflow "${workflowName}" not found. Please check the name and try again.`);
+                }
               }
               
               console.log('Fetching all workflows...');
@@ -79,7 +90,7 @@ jobs:
                 const { data: runs } = await github.rest.actions.listWorkflowRuns({
                   owner,
                   repo,
-                  workflow_id: workflow.name,
+                  workflow_id: workflow.id,
                   branch: branchName || undefined,
                   per_page: pageSize,
                   page: page,
