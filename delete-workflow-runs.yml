@@ -55,7 +55,7 @@ jobs:
               }
               
               console.log('Fetching all workflows...');
-              const { data: allWorkflows } = await github.rest.actions.listWorkflowsForRepo({
+              const { data: allWorkflows } = await github.rest.actions.listRepoWorkflows({
                 owner,
                 repo,
               });
