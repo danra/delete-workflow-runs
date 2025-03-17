@@ -7,8 +7,16 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
+      branch_selection:
+        description: 'Branch selection'
+        required: true
+        type: choice
+        options:
+          - 'specific'
+          - 'all'
+        default: 'specific'
       branch_name:
-        description: 'Branch name (empty for all)'
+        description: 'Branch name (required if "specific" is selected)'
         required: false
         type: string
       workflow_name:
@@ -53,12 +61,21 @@ jobs:
             const repo = context.repo.repo;
             
             function parseInputs() {
-              const branchName = '${{ github.event.inputs.branch_name }}';
+              const branchSelection = '${{ github.event.inputs.branch_selection }}';
+              const branchNameInput = '${{ github.event.inputs.branch_name }}';
               const workflowName = '${{ github.event.inputs.workflow_name }}';
               const daysOldInput = '${{ github.event.inputs.days_old }}';
               const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
               const status = '${{ github.event.inputs.status }}';
               const cleanupSelf = '${{ github.event.inputs.cleanup_self }}' === 'true';
+              
+              // Only use branch name if 'specific' is selected
+              const branchName = branchSelection === 'specific' ? branchNameInput : '';
+              
+              // Validate that branch name is provided when 'specific' is selected
+              if (branchSelection === 'specific' && (!branchName || branchName.trim() === '')) {
+                throw new Error('Branch name is required when "specific" branch selection is chosen');
+              }
               
               let cutoffDate = null;
               if (daysOldInput && daysOldInput.trim() !== '') {
@@ -67,7 +84,7 @@ jobs:
                 cutoffDate = new Date(now.setDate(now.getDate() - daysOld));
               }
               
-              return { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status, cleanupSelf };
+              return { branchName, branchSelection, workflowName, daysOldInput, dryRun, cutoffDate, status, cleanupSelf };
             }
             
             async function getWorkflows(workflowName) {
@@ -150,10 +167,10 @@ jobs:
             }
             
             async function main() {
-              const { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status, cleanupSelf } = parseInputs();
+              const { branchName, branchSelection, workflowName, daysOldInput, dryRun, cutoffDate, status, cleanupSelf } = parseInputs();
               
               console.log(`Searching for workflow runs with the following filters:`);
-              console.log(`- Branch: ${branchName || 'All branches'}`);
+              console.log(`- Branch: ${branchSelection === 'specific' ? branchName : 'All branches'}`);
               console.log(`- Workflow: ${workflowName || 'All workflows'}`);
               console.log(`- Older than: ${cutoffDate ? `${daysOldInput} days` : 'No age filter'}`);
               console.log(`- Status: ${status || 'All statuses'}`);
