@@ -24,6 +24,16 @@ on:
         required: true
         type: boolean
         default: true
+      status:
+        description: 'Filter by run status'
+        required: false
+        type: choice
+        options:
+          - ''
+          - 'cancelled'
+          - 'failure'
+          - 'success'
+        default: ''
 
 jobs:
   delete-runs:
@@ -42,6 +52,7 @@ jobs:
               const workflowName = '${{ github.event.inputs.workflow_name }}';
               const daysOldInput = '${{ github.event.inputs.days_old }}';
               const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
+              const status = '${{ github.event.inputs.status }}';
               
               let cutoffDate = null;
               if (daysOldInput && daysOldInput.trim() !== '') {
@@ -50,7 +61,7 @@ jobs:
                 cutoffDate = new Date(now.setDate(now.getDate() - daysOld));
               }
               
-              return { branchName, workflowName, daysOldInput, dryRun, cutoffDate };
+              return { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status };
             }
             
             async function getWorkflows(workflowName) {
@@ -112,7 +123,7 @@ jobs:
             
             async function deleteWorkflowRun(run, dryRun) {
               const prefix = dryRun ? "[DRY RUN] Would delete" : "Deleting";
-              console.log(`${prefix} workflow run #${run.id} - "${run.name}" - Branch: ${run.head_branch} - Created: ${new Date(run.created_at).toISOString()}`);
+              console.log(`${prefix} workflow run #${run.id} - "${run.name}" - Branch: ${run.head_branch} - Status: ${run.conclusion} - Created: ${new Date(run.created_at).toISOString()}`);
               
               if (dryRun) {
                 return true;
@@ -133,12 +144,13 @@ jobs:
             }
             
             async function main() {
-              const { branchName, workflowName, daysOldInput, dryRun, cutoffDate } = parseInputs();
+              const { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status } = parseInputs();
               
               console.log(`Searching for workflow runs with the following filters:`);
               console.log(`- Branch: ${branchName || 'All branches'}`);
               console.log(`- Workflow: ${workflowName || 'All workflows'}`);
               console.log(`- Older than: ${cutoffDate ? `${daysOldInput} days` : 'No age filter'}`);
+              console.log(`- Status: ${status || 'All statuses'}`);
               console.log(`- Dry run: ${dryRun ? 'Yes' : 'No'}`);
               
               const workflows = await getWorkflows(workflowName);
@@ -156,6 +168,11 @@ jobs:
                   const createdAt = new Date(run.created_at);
                   
                   if (cutoffDate && createdAt >= cutoffDate) continue;
+                  if (status && run.conclusion !== status) continue;
+                  if (!run.conclusion) {
+                    console.log(`Skipping pending workflow run #${run.id} - "${run.name}"`);
+                    continue;
+                  }
                   
                   const success = await deleteWorkflowRun(run, dryRun);
                   if (success) deletedRuns++;

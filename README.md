@@ -1,6 +1,6 @@
 # Delete Multiple Workflow Runs GitHub Action
 
-This GitHub Action allows you to delete multiple workflow runs based on various conditions, including branch name, workflow name, and age.
+This GitHub Action allows you to delete multiple workflow runs based on various conditions, including branch name, workflow name, status, and age.
 
 ## Setup
 
