@@ -1,0 +1,153 @@
+name: Delete Workflow Runs
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Branch name (empty for all)'
+        required: false
+        type: string
+      workflow_name:
+        description: 'Workflow name (empty for all)'
+        required: false
+        type: string
+      days_old:
+        description: 'Only delete runs older than X days'
+        required: false
+        type: number
+      dry_run:
+        description: 'Dry run'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  delete-runs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete workflow runs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            
+            function parseInputs() {
+              const branchName = '${{ github.event.inputs.branch_name }}';
+              const workflowName = '${{ github.event.inputs.workflow_name }}';
+              const daysOldInput = '${{ github.event.inputs.days_old }}';
+              const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
+              
+              let cutoffDate = null;
+              if (daysOldInput && daysOldInput.trim() !== '') {
+                const daysOld = parseInt(daysOldInput);
+                const now = new Date();
+                cutoffDate = new Date(now.setDate(now.getDate() - daysOld));
+              }
+              
+              return { branchName, workflowName, daysOldInput, dryRun, cutoffDate };
+            }
+            
+            async function getWorkflows(workflowName) {
+              if (workflowName) {
+                return [{ name: workflowName }];
+              }
+              
+              console.log('Fetching all workflows...');
+              const { data: allWorkflows } = await github.rest.actions.listWorkflowsForRepo({
+                owner,
+                repo,
+              });
+              console.log(`Found ${allWorkflows.workflows.length} workflows`);
+              return allWorkflows.workflows;
+            }
+            
+            async function fetchAllWorkflowRuns(workflow, branchName) {
+              let allWorkflowRuns = [];
+              let page = 1;
+              const pageSize = 100;
+              let hasMorePages = true;
+              
+              console.log(`Fetching workflow runs for workflow: ${workflow.name}...`);
+              
+              while (hasMorePages) {
+                const { data: runs } = await github.rest.actions.listWorkflowRuns({
+                  owner,
+                  repo,
+                  workflow_id: workflow.name,
+                  branch: branchName || undefined,
+                  per_page: pageSize,
+                  page: page,
+                });
+                
+                allWorkflowRuns = allWorkflowRuns.concat(runs.workflow_runs);
+                
+                hasMorePages = runs.workflow_runs.length === pageSize;
+                page++;
+                
+                if (hasMorePages) {
+                  console.log(`Fetched page ${page-1} (${runs.workflow_runs.length} runs), getting next page...`);
+                }
+              }
+              
+              console.log(`Found ${allWorkflowRuns.length} runs for workflow: ${workflow.name}`);
+              return allWorkflowRuns;
+            }
+            
+            async function deleteWorkflowRun(run, dryRun) {
+              const prefix = dryRun ? "[DRY RUN] Would delete" : "Deleting";
+              console.log(`${prefix} workflow run #${run.id} - "${run.name}" - Branch: ${run.head_branch} - Created: ${new Date(run.created_at).toISOString()}`);
+              
+              if (dryRun) {
+                return true;
+              }
+              
+              try {
+                await github.rest.actions.deleteWorkflowRun({
+                  owner,
+                  repo,
+                  run_id: run.id
+                });
+                console.log(`Successfully deleted run #${run.id}`);
+                return true;
+              } catch (error) {
+                console.error(`Failed to delete run #${run.id}: ${error.message}`);
+                return false;
+              }
+            }
+            
+            async function main() {
+              const { branchName, workflowName, daysOldInput, dryRun, cutoffDate } = parseInputs();
+              
+              console.log(`Searching for workflow runs with the following filters:`);
+              console.log(`- Branch: ${branchName || 'All branches'}`);
+              console.log(`- Workflow: ${workflowName || 'All workflows'}`);
+              console.log(`- Older than: ${cutoffDate ? `${daysOldInput} days` : 'No age filter'}`);
+              console.log(`- Dry run: ${dryRun ? 'Yes' : 'No'}`);
+              
+              const workflows = await getWorkflows(workflowName);
+              
+              let totalRuns = 0;
+              let deletedRuns = 0;
+              
+              for (const workflow of workflows) {
+                console.log(`Processing workflow: ${workflow.name}`);
+                
+                const workflowRuns = await fetchAllWorkflowRuns(workflow, branchName);
+                totalRuns += workflowRuns.length;
+                
+                for (const run of workflowRuns) {
+                  const createdAt = new Date(run.created_at);
+                  
+                  if (cutoffDate && createdAt >= cutoffDate) continue;
+                  
+                  const success = await deleteWorkflowRun(run, dryRun);
+                  if (success) deletedRuns++;
+                }
+              }
+              
+              console.log(`Summary: Found ${totalRuns} total runs, ${deletedRuns} ${dryRun ? 'would be' : 'were'} deleted`);
+            }
+            
+            await main();
