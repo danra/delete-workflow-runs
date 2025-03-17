@@ -29,6 +29,11 @@ on:
           - 'failure'
           - 'success'
         default: ''
+      cleanup_self:
+        description: 'Cleanup previous runs of this action'
+        required: true
+        type: boolean
+        default: true
       dry_run:
         description: 'Dry run'
         required: true
@@ -53,6 +58,7 @@ jobs:
               const daysOldInput = '${{ github.event.inputs.days_old }}';
               const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
               const status = '${{ github.event.inputs.status }}';
+              const cleanupSelf = '${{ github.event.inputs.cleanup_self }}' === 'true';
               
               let cutoffDate = null;
               if (daysOldInput && daysOldInput.trim() !== '') {
@@ -61,7 +67,7 @@ jobs:
                 cutoffDate = new Date(now.setDate(now.getDate() - daysOld));
               }
               
-              return { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status };
+              return { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status, cleanupSelf };
             }
             
             async function getWorkflows(workflowName) {
@@ -143,15 +149,65 @@ jobs:
               }
             }
             
+            async function cleanupSelfWorkflow(dryRun) {
+              const currentRunId = context.runId;
+              
+              try {
+                const { data: currentRun } = await github.rest.actions.getWorkflowRun({
+                  owner,
+                  repo,
+                  run_id: currentRunId
+                });
+                
+                const currentWorkflowId = currentRun.workflow_id;
+                console.log(`\nCleaning up previous runs of this workflow (ID: ${currentWorkflowId})`);
+                
+                const { data: workflow } = await github.rest.actions.getWorkflow({
+                  owner,
+                  repo,
+                  workflow_id: currentWorkflowId
+                });
+                
+                const workflowRuns = await fetchAllWorkflowRuns(workflow, "");
+                let deletedSelfRuns = 0;
+                
+                for (const run of workflowRuns) {
+                  if (run.id === currentRunId) {
+                    console.log(`Skipping current run #${run.id}`);
+                    continue;
+                  }
+                  
+                  if (!run.conclusion) {
+                    console.log(`Skipping pending workflow run #${run.id} - "${run.name}"`);
+                    continue;
+                  }
+                  
+                  const success = await deleteWorkflowRun(run, dryRun);
+                  if (success) deletedSelfRuns++;
+                }
+                
+                console.log(`${deletedSelfRuns} previous runs ${dryRun ? 'would be' : 'were'} deleted`);
+                return;
+              } catch (error) {
+                console.error(`Failed to cleanup self workflow: ${error.message}`);
+                return;
+              }
+            }
+            
             async function main() {
-              const { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status } = parseInputs();
+              const { branchName, workflowName, daysOldInput, dryRun, cutoffDate, status, cleanupSelf } = parseInputs();
               
               console.log(`Searching for workflow runs with the following filters:`);
               console.log(`- Branch: ${branchName || 'All branches'}`);
               console.log(`- Workflow: ${workflowName || 'All workflows'}`);
               console.log(`- Older than: ${cutoffDate ? `${daysOldInput} days` : 'No age filter'}`);
               console.log(`- Status: ${status || 'All statuses'}`);
+              console.log(`- Cleanup self: ${cleanupSelf ? 'Yes' : 'No'}`);
               console.log(`- Dry run: ${dryRun ? 'Yes' : 'No'}`);
+              
+              if (cleanupSelf) {
+                await cleanupSelfWorkflow(dryRun);
+              }
               
               const workflows = await getWorkflows(workflowName);
               
