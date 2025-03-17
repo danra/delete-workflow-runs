@@ -60,6 +60,10 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             
+            function isCurrentWorkflow(workflow) {
+              return workflow.name === 'Delete Workflow Runs' || workflow.path.includes('delete-workflow-runs');
+            }
+            
             function parseInputs() {
               const branchSelection = '${{ github.event.inputs.branch_selection }}';
               const branchNameInput = '${{ github.event.inputs.branch_name }}';
@@ -118,6 +122,10 @@ jobs:
               const pageSize = 100;
               let hasMorePages = true;
               
+              const current = isCurrentWorkflow(workflow);
+              
+              const branchToUse = current ? undefined : (branchName || undefined);
+              
               console.log(`Fetching workflow runs for workflow: ${workflow.name}...`);
               
               while (hasMorePages) {
@@ -125,7 +133,7 @@ jobs:
                   owner,
                   repo,
                   workflow_id: workflow.id,
-                  branch: branchName || undefined,
+                  branch: branchToUse,
                   per_page: pageSize,
                   page: page,
                 });
@@ -222,10 +230,12 @@ jobs:
                     continue;
                   }
                   
-                  const createdAt = new Date(run.created_at);
+                  if (!isCurrentWorkflow(workflow)) {
+                    const createdAt = new Date(run.created_at);
+                    if (cutoffDate && createdAt >= cutoffDate) continue;
+                    if (status && run.conclusion !== status) continue;
+                  }
                   
-                  if (cutoffDate && createdAt >= cutoffDate) continue;
-                  if (status && run.conclusion !== status) continue;
                   if (!run.conclusion) {
                     console.log(`Skipping pending workflow run #${run.id} - "${run.name}"`);
                     continue;
