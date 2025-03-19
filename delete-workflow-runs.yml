@@ -38,7 +38,7 @@ on:
           - 'success'
         default: ''
       cleanup_self:
-        description: 'Cleanup previous runs of this action'
+        description: 'Also cleanup previous runs of this action'
         required: true
         type: boolean
         default: true
