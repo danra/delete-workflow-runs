@@ -7,17 +7,9 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      branch_selection:
-        description: 'Branch selection'
-        required: true
-        type: choice
-        options:
-          - 'specific'
-          - 'all'
-        default: 'specific'
       branch_name:
-        description: 'Branch name (required if "specific" is selected)'
-        required: false
+        description: 'Branch name ("*" for all branches)'
+        required: true
         type: string
       workflow_name:
         description: 'Workflow name (empty for all)'
@@ -65,21 +57,15 @@ jobs:
             }
             
             function parseInputs() {
-              const branchSelection = '${{ github.event.inputs.branch_selection }}';
-              const branchNameInput = '${{ github.event.inputs.branch_name }}';
+              const branchName = '${{ github.event.inputs.branch_name }}';
               const workflowName = '${{ github.event.inputs.workflow_name }}';
               const daysOldInput = '${{ github.event.inputs.days_old }}';
               const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
               const status = '${{ github.event.inputs.status }}';
               const cleanupSelf = '${{ github.event.inputs.cleanup_self }}' === 'true';
               
-              // Only use branch name if 'specific' is selected
-              const branchName = branchSelection === 'specific' ? branchNameInput : '';
-              
-              // Validate that branch name is provided when 'specific' is selected
-              if (branchSelection === 'specific' && (!branchName || branchName.trim() === '')) {
-                throw new Error('Branch name is required when "specific" branch selection is chosen');
-              }
+              // Check if all branches are selected
+              const branchSelection = branchName === '*' ? 'all' : 'specific';
               
               let cutoffDate = null;
               if (daysOldInput && daysOldInput.trim() !== '') {
@@ -116,7 +102,7 @@ jobs:
               return allWorkflows.workflows;
             }
             
-            async function fetchAllWorkflowRuns(workflow, branchName) {
+            async function fetchAllWorkflowRuns(workflow, branchName, branchSelection) {
               let allWorkflowRuns = [];
               let page = 1;
               const pageSize = 100;
@@ -124,7 +110,7 @@ jobs:
               
               const current = isCurrentWorkflow(workflow);
               
-              const branchToUse = current ? undefined : (branchName || undefined);
+              const branchToUse = (current || branchSelection === 'all') ? undefined : branchName;
               
               console.log(`Fetching workflow runs for workflow: ${workflow.name}...`);
               
@@ -221,7 +207,7 @@ jobs:
               for (const workflow of workflows) {
                 console.log(`Processing workflow: ${workflow.name}`);
                 
-                const workflowRuns = await fetchAllWorkflowRuns(workflow, branchName);
+                const workflowRuns = await fetchAllWorkflowRuns(workflow, branchName, branchSelection);
                 totalRuns += workflowRuns.length;
                 
                 for (const run of workflowRuns) {
